@@ -12,14 +12,17 @@ app.use(bodyParser.json());
 const EMAIL = "haripragash714@gmail.com";
 const PASSWORD = "vgmttqixszleymkv"; 
 
-// Use Secure SMTP (Port 465) to prevent Render timeouts
+// FIX: Switched to Port 587 to fix "Connection Timeout"
 const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
-    port: 465,
-    secure: true, // true for 465, false for other ports
+    port: 587,
+    secure: false, // Must be false for port 587 (STARTTLS)
     auth: {
         user: EMAIL,
         pass: PASSWORD
+    },
+    tls: {
+        rejectUnauthorized: false
     }
 });
 
@@ -33,7 +36,6 @@ function detectCrash(frame) {
 
     const { ax, ay, az, gx, gy, gz } = frame;
 
-    // Calculate magnitude
     const gForce = Math.sqrt(ax*ax + ay*ay + az*az) / 9.81;
     const rotation = Math.sqrt(gx*gx + gy*gy + gz*gz);
 
@@ -46,11 +48,11 @@ function detectCrash(frame) {
 
 // ================= API ROUTES =================
 app.get("/", (req, res) => {
-    res.json({ message: "Smart Accident Backend is Live", version: "2.1.0 (Fixed)" });
+    res.json({ message: "Smart Accident Backend is Live", version: "2.2.0 (Port 587)" });
 });
 
 app.post("/sensor", (req, res) => {
-    // 👇 This log confirms connection every 30 seconds
+    // Heartbeat Log
     console.log("📡 DATA RECEIVED FROM ANDROID");
 
     // 1. INPUT VALIDATION
@@ -89,6 +91,7 @@ app.post("/sensor", (req, res) => {
             text: `EMERGENCY ALERT!\n\nUser: ${email}\nLocation: ${mapLink}\nTime: ${new Date().toLocaleString()}`
         };
 
+        // 5. SEND EMAIL
         transporter.sendMail(mailOptions, (err, info) => {
             if (err) {
                 console.error("❌ EMAIL FAILED:", err.message);
@@ -98,7 +101,7 @@ app.post("/sensor", (req, res) => {
         });
     }
 
-    // 5. IMMEDIATE RESPONSE TO APP
+    // 6. IMMEDIATE RESPONSE TO APP
     res.json({ crash });
 });
 
