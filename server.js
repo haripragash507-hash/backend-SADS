@@ -50,7 +50,9 @@ app.get("/", (req, res) => {
 });
 
 app.post("/sensor", (req, res) => {
+    // 👇 This log confirms connection every 30 seconds
     console.log("📡 DATA RECEIVED FROM ANDROID");
+
     // 1. INPUT VALIDATION
     const { sensor, email, location } = req.body;
 
@@ -62,12 +64,10 @@ app.post("/sensor", (req, res) => {
     const crash = detectCrash(sensor);
 
     if (crash) {
-        // 3. COOLDOWN CHECK (Prevent Spam)
+        // 3. COOLDOWN CHECK
         const currentTime = Date.now();
-        // FIX: Correct math for 1 minute (60 seconds * 1000 ms)
-        const cooldownTime = 60 * 1000; 
+        const cooldownTime = 60 * 1000; // 60 seconds
 
-        // FIX: Changed 'oneMinutes' to 'cooldownTime'
         if (currentTime - lastEmailSentTime < cooldownTime) {
             console.log("⚠️ Accident detected, but email SKIPPED (Cooldown active)");
             return res.json({ crash: true, message: "Email skipped (cooldown)" });
@@ -76,10 +76,8 @@ app.post("/sensor", (req, res) => {
         // 4. PREPARE EMAIL
         console.log(`🚨 ACCIDENT DETECTED for: ${email}. Sending email...`);
         
-        // Update the last sent time
         lastEmailSentTime = currentTime;
 
-        // FIX: Corrected Standard Google Maps Link
         const mapLink = location
             ? `https://www.google.com/maps?q=${location.lat},${location.lng}`
             : "Location not available";
@@ -88,20 +86,19 @@ app.post("/sensor", (req, res) => {
             from: `"Smart Accident System" <${EMAIL}>`,
             to: email,
             subject: "🚨 Accident Detected! Help Needed!",
-            text: `EMERGENCY ALERT!\n\nAn accident has been detected for user: ${email}\n\n📍 TRACK LOCATION:\n${mapLink}\n\nTime: ${new Date().toLocaleString()}`
+            text: `EMERGENCY ALERT!\n\nUser: ${email}\nLocation: ${mapLink}\nTime: ${new Date().toLocaleString()}`
         };
 
-        // 5. SEND EMAIL (Background Process)
         transporter.sendMail(mailOptions, (err, info) => {
             if (err) {
                 console.error("❌ EMAIL FAILED:", err.message);
             } else {
-                console.log("✅ EMAIL SENT SUCCESSFULLY:", info.response);
+                console.log("✅ EMAIL SENT SUCCESSFULLY");
             }
         });
     }
 
-    // 6. IMMEDIATE RESPONSE TO APP
+    // 5. IMMEDIATE RESPONSE TO APP
     res.json({ crash });
 });
 
