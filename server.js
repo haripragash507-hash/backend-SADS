@@ -50,6 +50,7 @@ app.get("/", (req, res) => {
 });
 
 app.post("/sensor", (req, res) => {
+    console.log("📡 DATA RECEIVED FROM ANDROID");
     // 1. INPUT VALIDATION
     const { sensor, email, location } = req.body;
 
