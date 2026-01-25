@@ -10,7 +10,7 @@ app.use(bodyParser.json());
 // ================= CONFIG =================
 // ⚠️ Ensure 'Less Secure Apps' is on or use an App Password
 const EMAIL = "haripragash714@gmail.com";
-const PASSWORD = "qyhqtostpatvqlnu"; 
+const PASSWORD = "vgmttqixszleymkv"; 
 
 const transporter = nodemailer.createTransport({
     service: "gmail",
