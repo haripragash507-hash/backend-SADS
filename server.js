@@ -11,11 +11,11 @@ app.use(bodyParser.json());
 const EMAIL = "haripragash714@gmail.com";
 const PASSWORD = "vgmttqixszleymkv"; 
 
-// FIX: Standard Configuration (Removed SSLv3 which causes timeouts)
+// FIX: Force IPv4 to prevent hanging on Render
 const transporter = nodemailer.createTransport({
     host: "smtp.gmail.com",
     port: 587,
-    secure: false, // Must be false for Port 587 (STARTTLS)
+    secure: false, 
     auth: {
         user: EMAIL,
         pass: PASSWORD
@@ -23,8 +23,11 @@ const transporter = nodemailer.createTransport({
     tls: {
         rejectUnauthorized: false
     },
-    logger: true, // 🔍 Prints detailed logs to help debug
-    debug: true   // 🔍 Shows connection details
+    // ⚠️ CRITICAL FIX: Force IPv4 (Fixes the hang after "Resolved...")
+    family: 4, 
+    logger: true,
+    debug: true,
+    connectionTimeout: 10000 
 });
 
 // ================= GLOBAL VARIABLES =================
@@ -47,11 +50,10 @@ function detectCrash(frame) {
 
 // ================= API ROUTES =================
 app.get("/", (req, res) => {
-    res.json({ message: "Smart Accident Backend is Live", version: "4.0.0 (Standard)" });
+    res.json({ message: "Smart Accident Backend is Live", version: "5.0.0 (IPv4 Fix)" });
 });
 
 app.post("/sensor", (req, res) => {
-    // Heartbeat
     console.log("📡 DATA RECEIVED FROM ANDROID");
 
     const { sensor, email, location } = req.body;
@@ -74,7 +76,7 @@ app.post("/sensor", (req, res) => {
         console.log(`🚨 ACCIDENT DETECTED for: ${email}. Sending email...`);
         lastEmailSentTime = currentTime;
 
-        // FIX: Replaced typo '0' with '$'
+        // Map Link
         const mapLink = location
             ? `http://googleusercontent.com/maps.google.com/maps?q=${location.lat},${location.lng}`
             : "Location not available";
