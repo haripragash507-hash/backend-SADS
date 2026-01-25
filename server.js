@@ -13,7 +13,7 @@ const SENDER_EMAIL = "haripragash714@gmail.com";
 const SENDER_NAME = "Smart Accident System";
 
 // 2. ⚠️ PASTE YOUR BREVO API KEY HERE (starts with xkeysib...)
-const BREVO_API_KEY = "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"; 
+const BREVO_API_KEY = "process.env.BREVO_API_KEY"; 
 
 // ================= GLOBAL VARIABLES =================
 let lastEmailSentTime = 0; 
