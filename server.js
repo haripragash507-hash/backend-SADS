@@ -13,10 +13,9 @@ const SENDER_EMAIL = "haripragash714@gmail.com";
 const SENDER_NAME = "Smart Accident System";
 
 // 2. ⚠️ PASTE YOUR BREVO API KEY HERE (starts with xkeysib...)
-const BREVO_API_KEY = "process.env.BREVO_API_KEY"; 
+const BREVO_API_KEY = process.env.BREVO_API_KEY; 
 
-// ================= GLOBAL VARIABLES =================
-let lastEmailSentTime = 0; 
+
 
 // ================= CRASH LOGIC =================
 function detectCrash(frame) {
@@ -75,36 +74,25 @@ app.get("/", (req, res) => {
 });
 
 app.post("/sensor", async (req, res) => {
+    
     console.log("📡 DATA RECEIVED FROM ANDROID");
 
     const { sensor, email, location } = req.body;
-
-    if (!sensor || !email) {
-        return res.status(400).json({ error: "sensor and email required" });
-    }
+    if (!sensor || !email) return res.status(400).json({ error: "Missing data" });
 
     const crash = detectCrash(sensor);
 
     if (crash) {
-        const currentTime = Date.now();
-        const cooldownTime = 60 * 1000; 
-
-        if (currentTime - lastEmailSentTime < cooldownTime) {
-            console.log("⚠️ Accident detected, but email SKIPPED (Cooldown)");
-            return res.json({ crash: true, message: "Skipped (cooldown)" });
-        }
-
-        console.log(`🚨 CRASH DETECTED! Sending to user: ${email}`);
-        lastEmailSentTime = currentTime;
-
-        const mapLink = location
-            ? `http://googleusercontent.com/maps.google.com/maps?q=${location.lat},${location.lng}`
+        // Corrected URL structure
+        const mapLink = location && location.lat && location.lng
+            ? `https://www.google.com/maps?q=${location.lat},${location.lng}`
             : "Location not available";
+            
+        console.log(`🚨 CRASH DETECTED! Sending to user: ${email}`);
 
-        // Send using Brevo
+        // Fire the email
         sendEmailViaBrevo(email, mapLink);
     }
-
     res.json({ crash });
 });
 
