@@ -15,7 +15,8 @@ const SENDER_NAME = "Smart Accident System";
 // 2. ⚠️ PASTE YOUR BREVO API KEY HERE (starts with xkeysib...)
 const BREVO_API_KEY = process.env.BREVO_API_KEY; 
 
-
+let lastEmailSentTime = 0;
+const COOLDOWN_MS = 30000; // 30 seconds wait before sending another email
 
 // ================= CRASH LOGIC =================
 function detectCrash(frame) {
@@ -74,25 +75,24 @@ app.get("/", (req, res) => {
 });
 
 app.post("/sensor", async (req, res) => {
-    
     console.log("📡 DATA RECEIVED FROM ANDROID");
-
     const { sensor, email, location } = req.body;
     if (!sensor || !email) return res.status(400).json({ error: "Missing data" });
 
     const crash = detectCrash(sensor);
+    const currentTime = Date.now();
 
-    if (crash) {
-        // Corrected URL structure
+    if (crash && (currentTime - lastEmailSentTime > COOLDOWN_MS)) {
+        lastEmailSentTime = currentTime; // Update the timer
+
         const mapLink = location && location.lat && location.lng
-            ? `https://www.google.com/maps?q=${location.lat},${location.lng}`
+            ? `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}`
             : "Location not available";
-            
-        console.log(`🚨 CRASH DETECTED! Sending to user: ${email}`);
 
-        // Fire the email
+        console.log(`🚨 CRASH DETECTED! Sending alert to: ${email}`);
         sendEmailViaBrevo(email, mapLink);
     }
+
     res.json({ crash });
 });
 
