@@ -12,8 +12,10 @@ const SENDER_NAME = "Smart Accident System";
 const BREVO_API_KEY = process.env.BREVO_API_KEY; 
 
 const userLastSeen = {}; 
-const INACTIVITY_LIMIT_MS = 60000; // 1 minute
-const GLOBAL_EMAIL_COOLDOWN_MS = 60000; // No more than 1 email per minute per user
+const pendingAlerts = {}; // 🆕 Tracks active 10s countdowns
+const GRACE_PERIOD_MS = 10000; // 10 seconds
+const INACTIVITY_LIMIT_MS = 60000; 
+const GLOBAL_EMAIL_COOLDOWN_MS = 60000; 
 const CRASH_COOLDOWN_MS = 30000; 
 
 // ================= CRASH LOGIC =================
@@ -25,12 +27,11 @@ function detectCrash(frame) {
     return (gForce > 3.2 && rotation > 3.5);
 }
 
-// ================= HELPER: SEND EMAIL WITH COOLDOWN =================
+// ================= HELPER: SEND EMAIL =================
 async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
     const now = Date.now();
     const userData = userLastSeen[userEmail];
 
-    // Check if we already sent an email too recently (Global Cooldown)
     if (userData && userData.lastEmailTime && (now - userData.lastEmailTime < GLOBAL_EMAIL_COOLDOWN_MS)) {
         console.log(`⏳ Cooldown active for ${userEmail}. Skipping email.`);
         return false;
@@ -50,7 +51,7 @@ async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
                 "api-key": BREVO_API_KEY,
                 "content-type": "application/json"
             },
-            body: JSON.stringify(body = {
+            body: JSON.stringify({
                 sender: { name: SENDER_NAME, email: SENDER_EMAIL },
                 to: [{ email: userEmail }],
                 subject: subject,
@@ -59,10 +60,7 @@ async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
         });
 
         if (response.ok) {
-            // Update the last email timestamp upon success
-            if (userLastSeen[userEmail]) {
-                userLastSeen[userEmail].lastEmailTime = now;
-            }
+            if (userLastSeen[userEmail]) userLastSeen[userEmail].lastEmailTime = now;
             console.log(`✅ Email sent to ${userEmail}`);
             return true;
         }
@@ -72,39 +70,32 @@ async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
     return false;
 }
 
-// ================= INACTIVITY CHECKER =================
-setInterval(() => {
-    const now = Date.now();
-    for (const email in userLastSeen) {
-        const userData = userLastSeen[email];
-        if (!userData.alertSent && (now - userData.timestamp > INACTIVITY_LIMIT_MS)) {
-            sendEmailViaBrevo(email, userData.lastMapLink, true).then(sent => {
-                if (sent) userData.alertSent = true;
-            });
-        }
-    }
-}, 30000);
-
 // ================= API ROUTES =================
+
+// 🆕 NEW ENDPOINT: App calls this when user clicks "CANCEL"
+app.post("/cancel", (req, res) => {
+    const { email } = req.body;
+    if (pendingAlerts[email]) {
+        console.log(`🛑 User ${email} cancelled the alert. Aborting email.`);
+        clearTimeout(pendingAlerts[email]); // Stop the 10s timer
+        delete pendingAlerts[email];
+        return res.json({ status: "cancelled" });
+    }
+    res.status(404).json({ error: "No active alert to cancel" });
+});
+
 app.post("/sensor", async (req, res) => {
-    
     console.log("📡 DATA RECEIVED FROM ANDROID");
 
     const { sensor, email, location } = req.body;
     if (!sensor || !email) return res.status(400).json({ error: "Missing data" });
 
     const currentTime = Date.now();
-    // Fixed the template literal syntax error here
     const mapLink = location && location.lat && location.lng
         ? `https://www.google.com/maps?q=${location.lat},${location.lng}`
         : "Location not available";
 
-    // Initialize user if they don't exist in memory
-    if (!userLastSeen[email]) {
-        userLastSeen[email] = { lastEmailTime: 0, lastCrashTime: 0 };
-    }
-
-    // Update Heartbeat
+    if (!userLastSeen[email]) userLastSeen[email] = { lastEmailTime: 0, lastCrashTime: 0 };
     userLastSeen[email].timestamp = currentTime;
     userLastSeen[email].lastMapLink = mapLink;
     userLastSeen[email].alertSent = false;
@@ -112,15 +103,22 @@ app.post("/sensor", async (req, res) => {
     const crash = detectCrash(sensor);
     if (crash && (currentTime - userLastSeen[email].lastCrashTime > CRASH_COOLDOWN_MS)) {
         userLastSeen[email].lastCrashTime = currentTime;
-        console.log(`🚨 CRASH DETECTED! Sending to user: ${email}`);
-        sendEmailViaBrevo(email, mapLink);
+        
+        console.log(`🚨 CRASH DETECTED! Waiting ${GRACE_PERIOD_MS/1000}s for user ${email}...`);
+
+        // 🛡️ Wait 10 seconds before sending
+        pendingAlerts[email] = setTimeout(() => {
+            console.log(`⏰ Time up! Sending accident alert for ${email}`);
+            sendEmailViaBrevo(email, mapLink);
+            delete pendingAlerts[email];
+        }, GRACE_PERIOD_MS);
     }
 
     res.json({ crash });
 });
 
 app.get("/", (req, res) => {
-    res.json({ message: "Backend Active", activeUsers: Object.keys(userLastSeen).length });
+    res.json({ message: "Backend Active with 10s Grace Period", activeUsers: Object.keys(userLastSeen).length });
 });
 
 const PORT = process.env.PORT || 5000;
