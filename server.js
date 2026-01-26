@@ -11,10 +11,10 @@ const SENDER_EMAIL = "haripragash714@gmail.com";
 const SENDER_NAME = "Smart Accident System";
 const BREVO_API_KEY = process.env.BREVO_API_KEY; 
 
-// Storage for tracking user activity
 const userLastSeen = {}; 
 const INACTIVITY_LIMIT_MS = 60000; // 1 minute
-const COOLDOWN_MS = 30000; 
+const GLOBAL_EMAIL_COOLDOWN_MS = 60000; // No more than 1 email per minute per user
+const CRASH_COOLDOWN_MS = 30000; 
 
 // ================= CRASH LOGIC =================
 function detectCrash(frame) {
@@ -25,28 +25,22 @@ function detectCrash(frame) {
     return (gForce > 3.2 && rotation > 3.5);
 }
 
-// ================= HELPER: SEND EMAIL =================
+// ================= HELPER: SEND EMAIL WITH COOLDOWN =================
 async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
-    const url = "https://api.brevo.com/v3/smtp/email";
-    
-    const subject = isDisconnect 
-        ? "⚠️ Alert: Device Connection Lost!" 
-        : "🚨 Accident Detected! Help Needed!";
-    
-    const messageHtml = isDisconnect
-        ? `<h2>⚠️ CONNECTION LOST</h2>
-           <p>The device for <b>${userEmail}</b> has stopped sending data for over 1 minute.</p>
-           <p>📍 Last known location: <a href="${mapLink}">View on Map</a></p>`
-        : `<h2>🚨 EMERGENCY ALERT!</h2>
-           <p>An accident has been detected for user: <b>${userEmail}</b></p>
-           <p>📍 <a href="${mapLink}">CLICK TO TRACK LOCATION</a></p>`;
+    const now = Date.now();
+    const userData = userLastSeen[userEmail];
 
-    const body = {
-        sender: { name: SENDER_NAME, email: SENDER_EMAIL },
-        to: [{ email: userEmail }],
-        subject: subject,
-        htmlContent: messageHtml
-    };
+    // Check if we already sent an email too recently (Global Cooldown)
+    if (userData && userData.lastEmailTime && (now - userData.lastEmailTime < GLOBAL_EMAIL_COOLDOWN_MS)) {
+        console.log(`⏳ Cooldown active for ${userEmail}. Skipping email.`);
+        return false;
+    }
+
+    const url = "https://api.brevo.com/v3/smtp/email";
+    const subject = isDisconnect ? "⚠️ Alert: Connection Lost!" : "🚨 Accident Detected!";
+    const messageHtml = isDisconnect
+        ? `<h2>⚠️ CONNECTION LOST</h2><p>Device for <b>${userEmail}</b> stopped sending data.</p><p>📍 <a href="${mapLink}">Last Known Location</a></p>`
+        : `<h2>🚨 EMERGENCY ALERT!</h2><p>Accident detected for: <b>${userEmail}</b></p><p>📍 <a href="${mapLink}">Track Location</a></p>`;
 
     try {
         const response = await fetch(url, {
@@ -56,60 +50,69 @@ async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
                 "api-key": BREVO_API_KEY,
                 "content-type": "application/json"
             },
-            body: JSON.stringify(body)
+            body: JSON.stringify(body = {
+                sender: { name: SENDER_NAME, email: SENDER_EMAIL },
+                to: [{ email: userEmail }],
+                subject: subject,
+                htmlContent: messageHtml
+            })
         });
-        return response.ok;
+
+        if (response.ok) {
+            // Update the last email timestamp upon success
+            if (userLastSeen[userEmail]) {
+                userLastSeen[userEmail].lastEmailTime = now;
+            }
+            console.log(`✅ Email sent to ${userEmail}`);
+            return true;
+        }
     } catch (error) {
-        console.error("❌ EMAIL ERROR:", error.message);
-        return false;
+        console.error("❌ Email failed:", error.message);
     }
+    return false;
 }
 
 // ================= INACTIVITY CHECKER =================
-// This runs every 30 seconds to check if any user has "disappeared"
 setInterval(() => {
     const now = Date.now();
     for (const email in userLastSeen) {
         const userData = userLastSeen[email];
-
-        // If user was active before, but now hasn't sent data for 1 minute
         if (!userData.alertSent && (now - userData.timestamp > INACTIVITY_LIMIT_MS)) {
-            console.log(`⚠️ User ${email} went offline. Sending alert...`);
-            
-            sendEmailViaBrevo(email, userData.lastMapLink, true);
-            
-            // Mark as alert sent so we don't spam emails every 30 seconds
-            userData.alertSent = true; 
+            sendEmailViaBrevo(email, userData.lastMapLink, true).then(sent => {
+                if (sent) userData.alertSent = true;
+            });
         }
     }
 }, 30000);
 
 // ================= API ROUTES =================
 app.post("/sensor", async (req, res) => {
+    
     console.log("📡 DATA RECEIVED FROM ANDROID");
 
     const { sensor, email, location } = req.body;
     if (!sensor || !email) return res.status(400).json({ error: "Missing data" });
 
     const currentTime = Date.now();
-    // ✅ CORRECT
-            const mapLink = location && location.lat && location.lng
-                ? `https://www.google.com/maps?q=${location.lat},${location.lng}`
-                : "Location not available";
-    
-    // 1. UPDATE USER STATUS (Heartbeat)
-    userLastSeen[email] = {
-        timestamp: currentTime,
-        lastMapLink: mapLink,
-        alertSent: false // Reset alert status because they are back online
-    };
+    // Fixed the template literal syntax error here
+    const mapLink = location && location.lat && location.lng
+        ? `https://www.google.com/maps?q=${location.lat},${location.lng}`
+        : "Location not available";
 
-    // 2. CRASH DETECTION
+    // Initialize user if they don't exist in memory
+    if (!userLastSeen[email]) {
+        userLastSeen[email] = { lastEmailTime: 0, lastCrashTime: 0 };
+    }
+
+    // Update Heartbeat
+    userLastSeen[email].timestamp = currentTime;
+    userLastSeen[email].lastMapLink = mapLink;
+    userLastSeen[email].alertSent = false;
+
     const crash = detectCrash(sensor);
-    // Use a user-specific cooldown for crashes
-    if (crash && (currentTime - (userLastSeen[email].lastCrashTime || 0) > COOLDOWN_MS)) {
+    if (crash && (currentTime - userLastSeen[email].lastCrashTime > CRASH_COOLDOWN_MS)) {
         userLastSeen[email].lastCrashTime = currentTime;
-        console.log(`🚨 CRASH DETECTED ! Sending to user: ${email}`);
+        console.log(`🚨 CRASH DETECTED! Sending to user: ${email}`);
         sendEmailViaBrevo(email, mapLink);
     }
 
@@ -117,7 +120,7 @@ app.post("/sensor", async (req, res) => {
 });
 
 app.get("/", (req, res) => {
-    res.json({ message: "Backend Live with Inactivity Monitor", activeUsers: Object.keys(userLastSeen).length });
+    res.json({ message: "Backend Active", activeUsers: Object.keys(userLastSeen).length });
 });
 
 const PORT = process.env.PORT || 5000;
