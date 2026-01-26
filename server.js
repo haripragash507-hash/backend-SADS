@@ -85,9 +85,10 @@ app.post("/sensor", async (req, res) => {
     if (crash && (currentTime - lastEmailSentTime > COOLDOWN_MS)) {
         lastEmailSentTime = currentTime; // Update the timer
 
-        const mapLink = location && location.lat && location.lng
-            ? `https://www.google.com/maps/search/?api=1&query=${location.lat},${location.lng}`
-            : "Location not available";
+        // ✅ CORRECT
+            const mapLink = location && location.lat && location.lng
+                ? `https://www.google.com/maps?q=${location.lat},${location.lng}`
+                : "Location not available";
 
         console.log(`🚨 CRASH DETECTED! Sending alert to: ${email}`);
         sendEmailViaBrevo(email, mapLink);
