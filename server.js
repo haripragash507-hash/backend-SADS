@@ -13,7 +13,7 @@ const BREVO_API_KEY = process.env.BREVO_API_KEY;
 
 const userLastSeen = {}; 
 const pendingAlerts = {}; // Tracks active 10s countdowns for cancellation
-const GRACE_PERIOD_MS = 10000; // 10 seconds grace period
+const GRACE_PERIOD_MS = 60000; // 1 minute grace period
 const INACTIVITY_LIMIT_MS = 60000; // 1 minute inactivity limit
 const GLOBAL_EMAIL_COOLDOWN_MS = 60000; // 1 email per minute limit
 const CRASH_COOLDOWN_MS = 30000; 
