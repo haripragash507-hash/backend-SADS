@@ -12,10 +12,10 @@ const SENDER_NAME = "Smart Accident System";
 const BREVO_API_KEY = process.env.BREVO_API_KEY; 
 
 const userLastSeen = {}; 
-const pendingAlerts = {}; // Tracks active 10s countdowns for cancellation
-const GRACE_PERIOD_MS = 10000; // 10 seconds grace period
-const INACTIVITY_LIMIT_MS = 60000; // 1 minute inactivity limit
-const GLOBAL_EMAIL_COOLDOWN_MS = 60000; // 1 email per minute limit
+const pendingAlerts = {}; // Tracks active countdowns for cancellation
+const GRACE_PERIOD_MS = 60000; // CHANGED: Now 1 minute (60,000 milliseconds)
+const INACTIVITY_LIMIT_MS = 60000; 
+const GLOBAL_EMAIL_COOLDOWN_MS = 60000; 
 const CRASH_COOLDOWN_MS = 30000; 
 
 // ================= CRASH LOGIC =================
@@ -32,7 +32,6 @@ async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
     const now = Date.now();
     const userData = userLastSeen[userEmail];
 
-    // Global Cooldown Check
     if (userData && userData.lastEmailTime && (now - userData.lastEmailTime < GLOBAL_EMAIL_COOLDOWN_MS)) {
         console.log(`⏳ Cooldown active for ${userEmail}. Skipping email.`);
         return false;
@@ -72,13 +71,11 @@ async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
 }
 
 // ================= INACTIVITY CHECKER (WATCHDOG) =================
-// Checks every 30 seconds if any user has gone "silent" for > 1 minute
 setInterval(() => {
     const now = Date.now();
     for (const email in userLastSeen) {
         const userData = userLastSeen[email];
         
-        // If user hasn't sent data for 1 minute AND we haven't alerted yet
         if (!userData.alertSent && (now - userData.timestamp > INACTIVITY_LIMIT_MS)) {
             console.log(`⚠️ User ${email} went offline. Sending alert...`);
             sendEmailViaBrevo(email, userData.lastMapLink, true).then(sent => {
@@ -90,7 +87,6 @@ setInterval(() => {
 
 // ================= API ROUTES =================
 
-// Endpoint for Android app to cancel a pending crash alert
 app.post("/cancel", (req, res) => {
     const { email } = req.body;
     if (pendingAlerts[email]) {
@@ -113,24 +109,21 @@ app.post("/sensor", async (req, res) => {
         ? `https://www.google.com/maps?q=${location.lat},${location.lng}`
         : "Location not available";
 
-    // Initialize user session tracking
     if (!userLastSeen[email]) {
         userLastSeen[email] = { lastEmailTime: 0, lastCrashTime: 0 };
     }
 
-    // Update Heartbeat / Status
     userLastSeen[email].timestamp = currentTime;
     userLastSeen[email].lastMapLink = mapLink;
-    userLastSeen[email].alertSent = false; // Reset disconnect alert if they reappear
+    userLastSeen[email].alertSent = false; 
 
-    // Crash Detection Logic
     const crash = detectCrash(sensor);
     if (crash && (currentTime - userLastSeen[email].lastCrashTime > CRASH_COOLDOWN_MS)) {
         userLastSeen[email].lastCrashTime = currentTime;
         
+        // This console log will now automatically show "60s grace period"
         console.log(`🚨 CRASH DETECTED! Waiting ${GRACE_PERIOD_MS/1000}s grace period for ${email}...`);
 
-        // Start the 10-second timer
         pendingAlerts[email] = setTimeout(() => {
             console.log(`⏰ Grace period over. Sending crash email for ${email}`);
             sendEmailViaBrevo(email, mapLink);
@@ -143,7 +136,7 @@ app.post("/sensor", async (req, res) => {
 
 app.get("/", (req, res) => {
     res.json({ 
-        message: "Backend Active with Grace Period & Inactivity Watchdog", 
+        message: "Backend Active with 1 Minute Grace Period & Inactivity Watchdog", 
         activeUsersCount: Object.keys(userLastSeen).length 
     });
 });
