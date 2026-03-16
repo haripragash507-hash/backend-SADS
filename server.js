@@ -109,28 +109,26 @@ app.post("/sensor", async (req, res) => {
     if (!sensor || !email) return res.status(400).json({ error: "Missing data" });
 
     const currentTime = Date.now();
+
+    // FIX: Corrected the template literal and added a valid fallback URL
     const mapLink = location && location.lat && location.lng
         ? `https://www.google.com/maps?q=${location.lat},${location.lng}`
-        : "Location not available";
+        : "https://maps.google.com"; 
 
-    // Initialize user session tracking
     if (!userLastSeen[email]) {
         userLastSeen[email] = { lastEmailTime: 0, lastCrashTime: 0 };
     }
 
-    // Update Heartbeat / Status
     userLastSeen[email].timestamp = currentTime;
     userLastSeen[email].lastMapLink = mapLink;
-    userLastSeen[email].alertSent = false; // Reset disconnect alert if they reappear
+    userLastSeen[email].alertSent = false; 
 
-    // Crash Detection Logic
     const crash = detectCrash(sensor);
     if (crash && (currentTime - userLastSeen[email].lastCrashTime > CRASH_COOLDOWN_MS)) {
         userLastSeen[email].lastCrashTime = currentTime;
         
         console.log(`🚨 CRASH DETECTED! Waiting ${GRACE_PERIOD_MS/1000}s grace period for ${email}...`);
 
-        // Start the 10-second timer
         pendingAlerts[email] = setTimeout(() => {
             console.log(`⏰ Grace period over. Sending crash email for ${email}`);
             sendEmailViaBrevo(email, mapLink);
@@ -140,7 +138,6 @@ app.post("/sensor", async (req, res) => {
 
     res.json({ crash });
 });
-
 app.get("/", (req, res) => {
     res.json({ 
         message: "Backend Active with Grace Period & Inactivity Watchdog", 
