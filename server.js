@@ -1,22 +1,69 @@
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
+require("dotenv").config();
+
+const { MongoClient } = require("mongodb");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 
+// ================= MONGODB SETUP =================
+const MONGO_URL = process.env.MONGO_URL;
+
+const client = new MongoClient(MONGO_URL);
+
+let db;
+let sensorCollection;
+let usersCollection;
+
+async function connectDB() {
+    try {
+        await client.connect();
+        console.log("✅ MongoDB Connected");
+
+        db = client.db("smart_accident_db");
+        sensorCollection = db.collection("sensor_logs");
+        usersCollection = db.collection("users");
+
+    } catch (err) {
+        console.error("❌ MongoDB Error:", err);
+    }
+}
+connectDB();
+
 // ================= CONFIGURATION =================
 const SENDER_EMAIL = "haripragash714@gmail.com"; 
 const SENDER_NAME = "Smart Accident System";
 const BREVO_API_KEY = process.env.BREVO_API_KEY; 
+const JWT_SECRET = process.env.JWT_SECRET;
 
 const userLastSeen = {}; 
-const pendingAlerts = {}; // Tracks active 10s countdowns for cancellation
-const GRACE_PERIOD_MS = 60000; // 1 minute grace period
-const INACTIVITY_LIMIT_MS = 60000; // 1 minute inactivity limit
-const GLOBAL_EMAIL_COOLDOWN_MS = 60000; // 1 email per minute limit
-const CRASH_COOLDOWN_MS = 30000; 
+const pendingAlerts = {}; 
+const GRACE_PERIOD_MS = 60000;
+const INACTIVITY_LIMIT_MS = 60000;
+const GLOBAL_EMAIL_COOLDOWN_MS = 60000;
+const CRASH_COOLDOWN_MS = 30000;
+
+// ================= AUTH MIDDLEWARE =================
+function authMiddleware(req, res, next) {
+    const token = req.headers.authorization;
+
+    if (!token) {
+        return res.status(401).json({ error: "No token provided" });
+    }
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
+        next();
+    } catch (err) {
+        return res.status(401).json({ error: "Invalid token" });
+    }
+}
 
 // ================= CRASH LOGIC =================
 function detectCrash(frame) {
@@ -27,14 +74,13 @@ function detectCrash(frame) {
     return (gForce > 3.2 && rotation > 3.5);
 }
 
-// ================= HELPER: SEND EMAIL =================
+// ================= EMAIL FUNCTION =================
 async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
     const now = Date.now();
     const userData = userLastSeen[userEmail];
 
-    // Global Cooldown Check
     if (userData && userData.lastEmailTime && (now - userData.lastEmailTime < GLOBAL_EMAIL_COOLDOWN_MS)) {
-        console.log(`⏳ Cooldown active for ${userEmail}. Skipping email.`);
+        console.log(`⏳ Cooldown active for ${userEmail}`);
         return false;
     }
 
@@ -62,7 +108,7 @@ async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
 
         if (response.ok) {
             if (userLastSeen[userEmail]) userLastSeen[userEmail].lastEmailTime = now;
-            console.log(`✅ Email sent to ${userEmail} (${isDisconnect ? 'Disconnect' : 'Crash'})`);
+            console.log(`✅ Email sent to ${userEmail}`);
             return true;
         }
     } catch (error) {
@@ -71,16 +117,14 @@ async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
     return false;
 }
 
-// ================= INACTIVITY CHECKER (WATCHDOG) =================
-// Checks every 30 seconds if any user has gone "silent" for > 1 minute
+// ================= INACTIVITY WATCHDOG =================
 setInterval(() => {
     const now = Date.now();
     for (const email in userLastSeen) {
         const userData = userLastSeen[email];
-        
-        // If user hasn't sent data for 1 minute AND we haven't alerted yet
+
         if (!userData.alertSent && (now - userData.timestamp > INACTIVITY_LIMIT_MS)) {
-            console.log(`⚠️ User ${email} went offline. Sending alert...`);
+            console.log(`⚠️ ${email} offline`);
             sendEmailViaBrevo(email, userData.lastMapLink, true).then(sent => {
                 if (sent) userData.alertSent = true;
             });
@@ -88,32 +132,70 @@ setInterval(() => {
     }
 }, 30000);
 
-// ================= API ROUTES =================
+// ================= AUTH ROUTES =================
 
-// Endpoint for Android app to cancel a pending crash alert
+// REGISTER
+app.post("/register", async (req, res) => {
+    const { email, password } = req.body;
+
+    const existingUser = await usersCollection.findOne({ email });
+    if (existingUser) {
+        return res.status(400).json({ error: "User exists" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    await usersCollection.insertOne({
+        email,
+        password: hashedPassword,
+        createdAt: new Date()
+    });
+
+    res.json({ message: "Registered successfully" });
+});
+
+// LOGIN
+app.post("/login", async (req, res) => {
+    const { email, password } = req.body;
+
+    const user = await usersCollection.findOne({ email });
+    if (!user) return res.status(400).json({ error: "User not found" });
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(400).json({ error: "Invalid password" });
+
+    const token = jwt.sign({ email }, JWT_SECRET, { expiresIn: "7d" });
+
+    res.json({ token });
+});
+
+// ================= EXISTING ROUTES =================
+
+// CANCEL ALERT
 app.post("/cancel", (req, res) => {
     const { email } = req.body;
     if (pendingAlerts[email]) {
-        console.log(`🛑 User ${email} clicked CANCEL. Aborting crash email.`);
-        clearTimeout(pendingAlerts[email]); 
+        clearTimeout(pendingAlerts[email]);
         delete pendingAlerts[email];
         return res.json({ status: "cancelled" });
     }
-    res.status(404).json({ error: "No active alert to cancel" });
+    res.status(404).json({ error: "No active alert" });
 });
 
-app.post("/sensor", async (req, res) => {
-    console.log("📡 DATA RECEIVED FROM ANDROID");
+// SENSOR (NOW PROTECTED + STORES DATA)
+app.post("/sensor", authMiddleware, async (req, res) => {
+    console.log("📡 DATA RECEIVED");
 
-    const { sensor, email, location } = req.body;
-    if (!sensor || !email) return res.status(400).json({ error: "Missing data" });
+    const { sensor, location } = req.body;
+    const email = req.user.email;
+
+    if (!sensor) return res.status(400).json({ error: "Missing data" });
 
     const currentTime = Date.now();
 
-    // FIX: Corrected the template literal and added a valid fallback URL
     const mapLink = location && location.lat && location.lng
         ? `https://www.google.com/maps?q=${location.lat},${location.lng}`
-        : "https://maps.google.com"; 
+        : "https://maps.google.com";
 
     if (!userLastSeen[email]) {
         userLastSeen[email] = { lastEmailTime: 0, lastCrashTime: 0 };
@@ -121,16 +203,24 @@ app.post("/sensor", async (req, res) => {
 
     userLastSeen[email].timestamp = currentTime;
     userLastSeen[email].lastMapLink = mapLink;
-    userLastSeen[email].alertSent = false; 
+    userLastSeen[email].alertSent = false;
 
     const crash = detectCrash(sensor);
+
+    // 🔥 STORE IN MONGODB
+    await sensorCollection.insertOne({
+        email,
+        sensor,
+        location,
+        mapLink,
+        crashDetected: crash,
+        timestamp: new Date()
+    });
+
     if (crash && (currentTime - userLastSeen[email].lastCrashTime > CRASH_COOLDOWN_MS)) {
         userLastSeen[email].lastCrashTime = currentTime;
-        
-        console.log(`🚨 CRASH DETECTED! Waiting ${GRACE_PERIOD_MS/1000}s grace period for ${email}...`);
 
         pendingAlerts[email] = setTimeout(() => {
-            console.log(`⏰ Grace period over. Sending crash email for ${email}`);
             sendEmailViaBrevo(email, mapLink);
             delete pendingAlerts[email];
         }, GRACE_PERIOD_MS);
@@ -138,12 +228,15 @@ app.post("/sensor", async (req, res) => {
 
     res.json({ crash });
 });
+
+// ROOT
 app.get("/", (req, res) => {
-    res.json({ 
-        message: "Backend Active with Grace Period & Inactivity Watchdog", 
-        activeUsersCount: Object.keys(userLastSeen).length 
+    res.json({
+        message: "Backend Active with MongoDB + Auth",
+        users: Object.keys(userLastSeen).length
     });
 });
 
+// ================= SERVER =================
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
