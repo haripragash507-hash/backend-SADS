@@ -108,7 +108,7 @@ async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
 
         if (response.ok) {
             if (userLastSeen[userEmail]) userLastSeen[userEmail].lastEmailTime = now;
-            console.log("📧 Email sent");
+            console.log(`📧 Email sent to ${userEmail}`);
             return true;
         }
     } catch (error) {
@@ -124,8 +124,9 @@ setInterval(() => {
         const userData = userLastSeen[email];
 
         if (!userData.alertSent && (now - userData.timestamp > INACTIVITY_LIMIT_MS)) {
-            console.log(`⚠️ ${email} offline`);
-            sendEmailViaBrevo(userData.emergencyEmail, userData.lastMapLink, true).then(sent => {
+            const emergencyEmail = userData.emergencyEmail || email;
+            console.log(`⚠️ ${email} offline — alerting ${emergencyEmail}`);
+            sendEmailViaBrevo(emergencyEmail, userData.lastMapLink, true).then(sent => {
                 if (sent) userData.alertSent = true;
             });
         }
@@ -235,7 +236,6 @@ app.post("/sensor", authMiddleware, async (req, res) => {
         console.log(`⏳ Grace period countdown starts for ${email} (${GRACE_PERIOD_MS / 1000}s)`);
         pendingAlerts[email] = setTimeout(() => {
             sendEmailViaBrevo(emergencyEmail, mapLink);
-            console.log(`📧 Email sent to ${emergencyEmail}`);
             delete pendingAlerts[email];
         }, GRACE_PERIOD_MS);
     }
