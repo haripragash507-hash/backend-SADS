@@ -239,4 +239,20 @@ app.get("/", (req, res) => {
 
 // ================= SERVER =================
 const PORT = process.env.PORT || 5000;
+// ================= UPDATE EMERGENCY CONTACT =================
+app.post("/update-contact", authMiddleware, async (req, res) => {
+    const { emergencyName, emergencyEmail } = req.body;
+    const email = req.user.email; // From JWT token
+
+    try {
+        await usersCollection.updateOne(
+            { email },
+            { $set: { emergencyName, emergencyEmail } }
+        );
+        res.json({ message: "Contact updated successfully" });
+    } catch (err) {
+        console.error("❌ Update Error:", err);
+        res.status(500).json({ error: "Failed to update contact" });
+    }
+});
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
