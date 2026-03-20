@@ -125,7 +125,7 @@ setInterval(() => {
 
         if (!userData.alertSent && (now - userData.timestamp > INACTIVITY_LIMIT_MS)) {
             console.log(`⚠️ ${email} offline`);
-            sendEmailViaBrevo(email, userData.lastMapLink, true).then(sent => {
+            sendEmailViaBrevo(userData.emergencyEmail, userData.lastMapLink, true).then(sent => {
                 if (sent) userData.alertSent = true;
             });
         }
@@ -136,7 +136,7 @@ setInterval(() => {
 
 // REGISTER
 app.post("/register", async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, emergencyEmail } = req.body;
 
     const existingUser = await usersCollection.findOne({ email });
     if (existingUser) {
@@ -148,6 +148,7 @@ app.post("/register", async (req, res) => {
     await usersCollection.insertOne({
         email,
         password: hashedPassword,
+        emergencyEmail: emergencyEmail || email, // default to registered email if not provided
         createdAt: new Date()
     });
 
@@ -189,6 +190,11 @@ app.post("/sensor", authMiddleware, async (req, res) => {
     const { sensor, location } = req.body;
     const email = req.user.email;
 
+    const user = await usersCollection.findOne({ email });
+    if (!user) return res.status(400).json({ error: "User not found" });
+
+    const emergencyEmail = user.emergencyEmail || email;
+
     if (!sensor) return res.status(400).json({ error: "Missing data" });
 
     const currentTime = Date.now();
@@ -204,6 +210,7 @@ app.post("/sensor", authMiddleware, async (req, res) => {
     userLastSeen[email].timestamp = currentTime;
     userLastSeen[email].lastMapLink = mapLink;
     userLastSeen[email].alertSent = false;
+    userLastSeen[email].emergencyEmail = emergencyEmail;
 
     const crash = detectCrash(sensor);
 
@@ -221,7 +228,7 @@ app.post("/sensor", authMiddleware, async (req, res) => {
         userLastSeen[email].lastCrashTime = currentTime;
 
         pendingAlerts[email] = setTimeout(() => {
-            sendEmailViaBrevo(email, mapLink);
+            sendEmailViaBrevo(emergencyEmail, mapLink);
             delete pendingAlerts[email];
         }, GRACE_PERIOD_MS);
     }
@@ -239,20 +246,4 @@ app.get("/", (req, res) => {
 
 // ================= SERVER =================
 const PORT = process.env.PORT || 5000;
-// ================= UPDATE EMERGENCY CONTACT =================
-app.post("/update-contact", authMiddleware, async (req, res) => {
-    const { emergencyName, emergencyEmail } = req.body;
-    const email = req.user.email; // From JWT token
-
-    try {
-        await usersCollection.updateOne(
-            { email },
-            { $set: { emergencyName, emergencyEmail } }
-        );
-        res.json({ message: "Contact updated successfully" });
-    } catch (err) {
-        console.error("❌ Update Error:", err);
-        res.status(500).json({ error: "Failed to update contact" });
-    }
-});
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
