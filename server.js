@@ -108,7 +108,7 @@ async function sendEmailViaBrevo(userEmail, mapLink, isDisconnect = false) {
 
         if (response.ok) {
             if (userLastSeen[userEmail]) userLastSeen[userEmail].lastEmailTime = now;
-            console.log(`✅ Email sent to ${userEmail}`);
+            console.log("📧 Email sent");
             return true;
         }
     } catch (error) {
@@ -178,6 +178,7 @@ app.post("/cancel", (req, res) => {
     if (pendingAlerts[email]) {
         clearTimeout(pendingAlerts[email]);
         delete pendingAlerts[email];
+        console.log(`⏸️ Grace period countdown cancelled for ${email}`);
         return res.json({ status: "cancelled" });
     }
     res.status(404).json({ error: "No active alert" });
@@ -224,11 +225,17 @@ app.post("/sensor", authMiddleware, async (req, res) => {
         timestamp: new Date()
     });
 
+    if (crash) {
+        console.log(`🚨 Crash detected for ${email}`);
+    }
+
     if (crash && (currentTime - userLastSeen[email].lastCrashTime > CRASH_COOLDOWN_MS)) {
         userLastSeen[email].lastCrashTime = currentTime;
 
+        console.log(`⏳ Grace period countdown starts for ${email} (${GRACE_PERIOD_MS / 1000}s)`);
         pendingAlerts[email] = setTimeout(() => {
             sendEmailViaBrevo(emergencyEmail, mapLink);
+            console.log(`📧 Email sent to ${emergencyEmail}`);
             delete pendingAlerts[email];
         }, GRACE_PERIOD_MS);
     }
