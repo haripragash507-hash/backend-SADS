@@ -154,7 +154,7 @@ app.post("/register", async (req, res) => {
     res.json({ message: "Registered successfully" });
 });
 
-// 3. NEW UPDATE-CONTACT ROUTE
+// 3. UPDATE-CONTACT ROUTE (Immediate update from button click)
 app.post("/update-contact", authMiddleware, async (req, res) => {
     const { emergencyName, emergencyEmail } = req.body;
     const email = req.user.email;
@@ -164,11 +164,14 @@ app.post("/update-contact", authMiddleware, async (req, res) => {
             { email: email },
             { $set: { emergencyName, emergencyEmail } }
         );
-        res.json({ message: "Contact updated" });
+        console.log(`✅ Immediate DB Update for ${email}: ${emergencyEmail}`);
+        res.json({ message: "Contact updated successfully" });
     } catch (err) {
         res.status(500).json({ error: "Update failed" });
     }
 });
+
+
 
 // LOGIN
 app.post("/login", async (req, res) => {
@@ -199,30 +202,33 @@ app.post("/cancel", (req, res) => {
     res.status(404).json({ error: "No active alert" });
 });
 
-// SENSOR (NOW PROTECTED + STORES DATA)
+// SENSOR ROUTE (Protected + Fallback Update)
 app.post("/sensor", authMiddleware, async (req, res) => {
-    console.log("📡 DATA RECEIVED");
-
-    const { sensor, location } = req.body;
+    const { sensor, location, emergencyEmail: bodyEmail, emergencyName: bodyName } = req.body;
     const email = req.user.email;
 
+    if (!sensor) return res.status(400).json({ error: "Missing data" });
+
+    // 1. Fallback Sync: Update DB if info is provided in heartbeat
+    if (bodyEmail || bodyName) {
+        await usersCollection.updateOne(
+            { email: email },
+            { $set: { emergencyEmail: bodyEmail, emergencyName: bodyName } }
+        );
+    }
+
+    // 2. Fetch latest user data for alert logic
     const user = await usersCollection.findOne({ email });
     if (!user) return res.status(400).json({ error: "User not found" });
 
     const emergencyEmail = user.emergencyEmail || email;
-
-    if (!sensor) return res.status(400).json({ error: "Missing data" });
-
     const currentTime = Date.now();
-
     const mapLink = location && location.lat && location.lng
         ? `https://www.google.com/maps?q=${location.lat},${location.lng}`
         : "https://maps.google.com";
 
-    if (!userLastSeen[email]) {
-        userLastSeen[email] = { lastEmailTime: 0, lastCrashTime: 0 };
-    }
-
+    // Update session tracking
+    if (!userLastSeen[email]) userLastSeen[email] = { lastEmailTime: 0, lastCrashTime: 0 };
     userLastSeen[email].timestamp = currentTime;
     userLastSeen[email].lastMapLink = mapLink;
     userLastSeen[email].alertSent = false;
@@ -230,7 +236,7 @@ app.post("/sensor", authMiddleware, async (req, res) => {
 
     const crash = detectCrash(sensor);
 
-    // 🔥 STORE IN MONGODB
+    // Store log in MongoDB
     await sensorCollection.insertOne({
         email,
         sensor,
@@ -240,14 +246,10 @@ app.post("/sensor", authMiddleware, async (req, res) => {
         timestamp: new Date()
     });
 
-    if (crash) {
-        console.log(`🚨 Crash detected for ${email}`);
-    }
-
+    // Crash Alert Logic
     if (crash && (currentTime - userLastSeen[email].lastCrashTime > CRASH_COOLDOWN_MS)) {
         userLastSeen[email].lastCrashTime = currentTime;
-
-        console.log(`⏳ Grace period countdown starts for ${email} (${GRACE_PERIOD_MS / 1000}s)`);
+        console.log(`⏳ Grace period started for ${email}`);
         pendingAlerts[email] = setTimeout(() => {
             sendEmailViaBrevo(emergencyEmail, mapLink);
             delete pendingAlerts[email];
