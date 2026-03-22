@@ -204,7 +204,7 @@ app.post("/cancel", (req, res) => {
 
 // SENSOR ROUTE (Protected + Fallback Update)
 app.post("/sensor", authMiddleware, async (req, res) => {
-    console.log('DATA RECEIVED');
+    console.log("📡 DATA RECEIVED");
     const { sensor, location, emergencyEmail: bodyEmail, emergencyName: bodyName } = req.body;
     const email = req.user.email;
 
@@ -246,7 +246,9 @@ app.post("/sensor", authMiddleware, async (req, res) => {
         crashDetected: crash,
         timestamp: new Date()
     });
-
+     if (crash) {
+        console.log(`🚨 Crash detected for ${email}`);
+    }
     // Crash Alert Logic
     if (crash && (currentTime - userLastSeen[email].lastCrashTime > CRASH_COOLDOWN_MS)) {
         userLastSeen[email].lastCrashTime = currentTime;
