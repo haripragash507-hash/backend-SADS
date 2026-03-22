@@ -204,7 +204,7 @@ app.post("/cancel", (req, res) => {
 
 // SENSOR ROUTE (Protected + Fallback Update)
 app.post("/sensor", authMiddleware, async (req, res) => {
-    consle.log('DATA RECEIVED');
+    console.log('DATA RECEIVED');
     const { sensor, location, emergencyEmail: bodyEmail, emergencyName: bodyName } = req.body;
     const email = req.user.email;
 
