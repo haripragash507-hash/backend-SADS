@@ -48,13 +48,13 @@ const INACTIVITY_LIMIT_MS = 60000;
 const GLOBAL_EMAIL_COOLDOWN_MS = 60000;
 const CRASH_COOLDOWN_MS = 30000;
 
-// ================= AUTH MIDDLEWARE =================
+// 1. FIXED AUTH MIDDLEWARE
 function authMiddleware(req, res, next) {
-    const token = req.headers.authorization;
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: "No token" });
 
-    if (!token) {
-        return res.status(401).json({ error: "No token provided" });
-    }
+    // EXTRACT TOKEN (Bearer <token>)
+    const token = authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : authHeader;
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
@@ -64,6 +64,8 @@ function authMiddleware(req, res, next) {
         return res.status(401).json({ error: "Invalid token" });
     }
 }
+
+
 
 // ================= CRASH LOGIC =================
 function detectCrash(frame) {
@@ -135,25 +137,37 @@ setInterval(() => {
 
 // ================= AUTH ROUTES =================
 
-// REGISTER
+// 2. FIXED REGISTER ROUTE
 app.post("/register", async (req, res) => {
-    const { email, password, emergencyEmail } = req.body;
-
+    const { email, password } = req.body;
     const existingUser = await usersCollection.findOne({ email });
-    if (existingUser) {
-        return res.status(400).json({ error: "User exists" });
-    }
+    if (existingUser) return res.status(400).json({ error: "User exists" });
 
     const hashedPassword = await bcrypt.hash(password, 10);
-
     await usersCollection.insertOne({
         email,
         password: hashedPassword,
-        emergencyEmail: emergencyEmail || email, // default to registered email if not provided
+        emergencyEmail: "", // FIX: Stay empty until user sets it
+        emergencyName: "",
         createdAt: new Date()
     });
-
     res.json({ message: "Registered successfully" });
+});
+
+// 3. NEW UPDATE-CONTACT ROUTE
+app.post("/update-contact", authMiddleware, async (req, res) => {
+    const { emergencyName, emergencyEmail } = req.body;
+    const email = req.user.email;
+
+    try {
+        await usersCollection.updateOne(
+            { email: email },
+            { $set: { emergencyName, emergencyEmail } }
+        );
+        res.json({ message: "Contact updated" });
+    } catch (err) {
+        res.status(500).json({ error: "Update failed" });
+    }
 });
 
 // LOGIN
